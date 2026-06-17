@@ -26,7 +26,7 @@ TECH_SKILLS = [
     # AWS Services
     "s3", "emr", "glue", "athena",
     "lambda", "eks", "ecs", "dynamodb",
-    "kinesis", "redshift",
+    "kinesis", "redshift","aurora",
 
     # Azure Services
     "azure data factory", "adf",
@@ -47,6 +47,7 @@ TECH_SKILLS = [
 
     # Lakehouse
     "databricks",
+    "unity catalog",
     "delta lake",
     "apache iceberg",
     "iceberg",
@@ -85,6 +86,7 @@ TECH_SKILLS = [
     "jenkins",
     "gitlab",
     "gitlab ci",
+    "ci/cd",
     "github actions",
     "azure devops",
     "argocd",
@@ -152,14 +154,30 @@ TECH_SKILLS = [
     "data mesh",
     "data fabric",
     "cdc",
-    "change data capture"
+    "change data capture",
+
+    # Web Scraping
+    "beautifulsoup", "selenium", "playwright", "scrapy",
+    "requests", "httpx", "aiohttp",
+
+    # AI / LLM Frameworks  
+    "langchain", "llamaindex", "openrouter", "langraph",
+    "ollama", "huggingface", "transformers",
+
+    # Version Control
+    "github", "git", "bitbucket",
+
+    # Formats complémentaires
+    "csv", "excel", "google sheets",
+
+    # Automation
+    "automation", "scripting",
 ]
 
+import re
+SKILLS_WITH_SPECIAL_CHARS = ["c++", "c#", "pl/sql", "ci/cd", "pub/sub", "rest api", "api rest"]
+
 def extract_skills_from_text(text: str) -> list[str]:
-    """
-    Scans job offer text and returns all tech skills found.
-    Case-insensitive exact matching against TECH_SKILLS dictionary.
-    """
     if not text:
         return []
 
@@ -167,7 +185,17 @@ def extract_skills_from_text(text: str) -> list[str]:
     found = []
 
     for skill in TECH_SKILLS:
-        if skill.lower() in text_lower:
+        skill_lower = skill.lower()
+
+        if skill_lower in SKILLS_WITH_SPECIAL_CHARS:
+            # Simple substring match for skills with special chars
+            # Surrounded by non-alphanumeric or start/end of string
+            pattern = r"(?<![a-z0-9])" + re.escape(skill_lower) + r"(?![a-z0-9])"
+        else:
+            # Word boundary match for normal skills
+            pattern = r"\b" + re.escape(skill_lower) + r"\b"
+
+        if re.search(pattern, text_lower):
             found.append(skill)
 
     return found

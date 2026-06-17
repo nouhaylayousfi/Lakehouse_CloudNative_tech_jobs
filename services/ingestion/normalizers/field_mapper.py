@@ -3,6 +3,7 @@ from datetime import datetime
 from services.ingestion.skill_extraction.dict_matcher import extract_skills_from_text
 
 
+
 def map_france_travail(raw: dict) -> dict: 
     """Maps raw France Travail API response to unified schema."""
 
@@ -158,5 +159,96 @@ def map_rekrute(raw: dict) -> dict:
         "date_ingestion":     datetime.utcnow().isoformat(),
         "url_offre":          url,
         "nombre_postes":      raw.get("nombre_postes", ""),
+        "langue":             "fr",
+    }
+
+
+def map_adzuna(raw: dict) -> dict:
+    """Maps raw Adzuna API response to unified schema."""
+
+    # --- Location ---
+    # Adzuna returns location as a hierarchy list:
+    # ["France", "Hauts-De-France", "Nord", "Lille", "Villeneuve-d'Ascq"]
+    location     = raw.get("location", {})
+    area         = location.get("area", [])
+    # area[0] = country, area[1] = region, area[-1] = most specific city
+    ville_brute  = area[-1] if len(area) >= 1 else location.get("display_name", "")
+    region       = area[1]  if len(area) >= 2 else ""
+
+    # --- Salary ---
+    # salary_is_predicted = "1" means Adzuna estimated it — not declared by employer
+    # salary_is_predicted = "0" means no salary info at all
+    salary_min       = raw.get("salary_min")
+    salary_max       = raw.get("salary_max")
+    salary_predicted = raw.get("salary_is_predicted", "0") == "1"
+    # ^ True = estimated by Adzuna algorithm, False = not available
+
+    # --- Company ---
+    company = raw.get("company", {})
+
+    # --- ID ---
+    id_source = raw.get("id", "")
+    id_hash   = hashlib.md5(f"adzuna_{id_source}".encode()).hexdigest()
+
+    description = raw.get("description", "")
+    titre       = raw.get("title", "")
+
+    # Extract skills from title + truncated description
+    competences = extract_skills_from_text(f"{titre} {description}")
+
+
+    return {
+        # Identification
+        "id_hash":            id_hash,
+        "id_source":          id_source,
+        "source":             "adzuna",
+        "pays":               "FR",
+
+        # Job
+        "titre_brut":         raw.get("title", ""),
+        "description":        raw.get("description", ""),
+        # ^ Truncated to ~200 chars by Adzuna — no full text available
+
+        "type_contrat":       "",
+        # ^ Not available in Adzuna API
+
+        "niveau_experience":  "",
+        # ^ Not available in Adzuna API
+
+        # Location
+        "ville_brute":        ville_brute,
+        "region":             region,
+        "latitude":           raw.get("latitude"),
+        "longitude":          raw.get("longitude"),
+        # ^ GPS coordinates available — useful for geo analysis
+
+        # Company
+        "entreprise":         company.get("display_name", ""),
+        "secteur_activite":   raw.get("category", {}).get("label", ""),
+        "tranche_effectif":   None,
+
+        # Salary
+        "salaire_brut":       None,
+        "salaire_min":        salary_min,
+        "salaire_max":        salary_max,
+        "salaire_est":        salary_predicted,
+        # ^ Flag : True = Adzuna estimation, False = not available
+
+        # Skills — extracted from description via dict_matcher in Silver
+        "competences_brutes": competences,
+        "qualites_pro":       [],
+        "langues":            [],
+
+        # ROME — not available in Adzuna
+        "code_rome":          None,
+        "libelle_rome":       None,
+        "appellation_rome":   None,
+
+        # Metadata
+        "date_publication":   raw.get("created", ""),
+        "date_actualisation": None,
+        "date_ingestion":     datetime.utcnow().isoformat(),
+        "url_offre":          raw.get("redirect_url", ""),
+        "nombre_postes":      None,
         "langue":             "fr",
     }

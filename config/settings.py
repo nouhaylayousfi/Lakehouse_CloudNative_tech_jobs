@@ -13,3 +13,21 @@ FT_SCOPE = "api_offresdemploiv2 o2dsoffre"
 #Rekrute 
 REKRUTE_BASE_URL   = "https://www.rekrute.com"
 REKRUTE_SEARCH_URL = "https://www.rekrute.com/offres.html?s=3&lang=fr"
+
+#Adzuna
+ADZUNA_APP_ID   = os.getenv("ADZUNA_APP_ID")
+ADZUNA_APP_KEY  = os.getenv("ADZUNA_APP_KEY")
+ADZUNA_BASE_URL = "https://api.adzuna.com/v1/api/jobs"
+
+# Tech keywords to search 
+ADZUNA_TECH_KEYWORDS = [
+    "data engineer",
+    "data scientist",
+    "python developer",
+    "devops",
+    "cloud engineer",
+    "machine learning",
+    "fullstack developer",
+    "backend developer",
+    "software engineer",
+]
