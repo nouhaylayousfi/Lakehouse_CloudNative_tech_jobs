@@ -95,3 +95,68 @@ def map_france_travail(raw: dict) -> dict:
         "langue":               "fr",
     }
 
+
+def map_rekrute(raw: dict) -> dict:
+    """Maps raw Rekrute scraper output to unified schema."""
+
+    # Generate unique hash from URL
+    url       = raw.get("url", "")
+    id_hash   = hashlib.md5(f"rekrute_{url}".encode()).hexdigest()
+
+    # Skills extracted from description via dict_matcher (called separately)
+    # For now we store the raw description — extraction happens in Silver layer
+    description = raw.get("description", "")
+
+    return {
+        # Identification
+        "id_hash":            id_hash,
+        "id_source":          url,
+        "source":             "rekrute",
+        "pays":               "MA",
+
+        # Job
+        "titre_brut":         raw.get("titre_brut", ""),
+        "description":        description,
+        "type_contrat":       raw.get("contract_type", ""),
+        "niveau_experience":  " | ".join(raw.get("experience", [])),
+        "education":          " | ".join(raw.get("education", [])),
+
+        # Location
+        "ville_brute":        raw.get("ville_brute", ""),
+        "code_postal":        None,
+        "latitude":           None,
+        "longitude":          None,
+
+        # Company
+        "entreprise":         raw.get("company_name", ""),
+        "secteur_activite":   " | ".join(raw.get("secteur", [])),
+        "tranche_effectif":   None,
+
+        # Salary — not available on Rekrute
+        "salaire_brut":       None,
+        "salaire_min":        None,
+        "salaire_max":        None,
+
+        # Skills — extracted from description text
+        "competences_brutes": [],
+        # ^ will be populated by dict_matcher in Silver layer
+
+        "qualites_pro":       [],
+        "langues":            [],
+
+        # ROME — not available on Rekrute
+        "code_rome":          None,
+        "libelle_rome":       None,
+        "appellation_rome":   None,
+
+        # Remote
+        "remote":             raw.get("remote", ""),
+
+        # Metadata
+        "date_publication":   raw.get("date_publication", ""),
+        "date_actualisation": None,
+        "date_ingestion":     datetime.utcnow().isoformat(),
+        "url_offre":          url,
+        "nombre_postes":      raw.get("nombre_postes", ""),
+        "langue":             "fr",
+    }

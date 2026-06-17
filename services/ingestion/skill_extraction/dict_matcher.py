@@ -2,7 +2,7 @@
 TECH_SKILLS = [
     # Programming Languages
     "python", "java", "scala", "go", "golang", "rust",
-    "javascript", "typescript", "sql", "pl/sql", "r",
+    "javascript", "typescript", "sql", "pl/sql",
     "bash", "shell", "powershell", "c#", "c++",
 
     # Big Data & Streaming
