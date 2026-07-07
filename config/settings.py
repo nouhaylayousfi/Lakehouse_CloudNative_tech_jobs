@@ -3,6 +3,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+#Groq
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
+
 #France Travail 
 FT_CLIENT_ID = os.getenv("FT_CLIENT_ID")
 FT_CLIENT_SECRET = os.getenv("FT_CLIENT_SECRET")
@@ -18,6 +22,11 @@ REKRUTE_SEARCH_URL = "https://www.rekrute.com/offres.html?s=3&lang=fr"
 ADZUNA_APP_ID   = os.getenv("ADZUNA_APP_ID")
 ADZUNA_APP_KEY  = os.getenv("ADZUNA_APP_KEY")
 ADZUNA_BASE_URL = "https://api.adzuna.com/v1/api/jobs"
+
+# Emploi.ma
+EMPLOIMA_BASE_URL = "https://www.emploi.ma"
+EMPLOIMA_SEARCH_URL = "https://www.emploi.ma/recherche-jobs-maroc/informatique"
+
 
 # Tech keywords to search 
 ADZUNA_TECH_KEYWORDS = [

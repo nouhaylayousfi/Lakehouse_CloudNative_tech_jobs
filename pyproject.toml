@@ -2,5 +2,9 @@
 name = "PFE_TECH_JOBS"
 version = "0.1.0"
 
+dependencies = [
+    "boto3",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
