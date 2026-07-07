@@ -141,12 +141,7 @@ class FranceTravailClient:
             data = response.json()
             
             raw_offers = data.get("resultats", [])
-            if raw_offers:
-                try:
-                    mapped = map_france_travail(raw_offers[0])
-                    print("Mapper OK:", mapped["titre_brut"])
-                except Exception as e:
-                    print("Mapper ERROR:", e)
+        
             logger.info("%d offers found for '%s' . ", len(raw_offers), keyword)
 
             return [map_france_travail(offer) for offer in raw_offers]
