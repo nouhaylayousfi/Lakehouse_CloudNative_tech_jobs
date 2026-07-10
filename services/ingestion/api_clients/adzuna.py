@@ -18,7 +18,7 @@ from config.settings import (
     ADZUNA_APP_ID,
     ADZUNA_APP_KEY,
     ADZUNA_BASE_URL,
-    ADZUNA_TECH_KEYWORDS,
+    TECH_KEYWORDS,
 )
 
 from services.ingestion.normalizers.field_mapper import map_adzuna
@@ -156,7 +156,7 @@ class AdzunaClient:
 
         all_offers = {} # { id_hash: offer } for deduplication across keywords
 
-        for keyword in ADZUNA_TECH_KEYWORDS:
+        for keyword in TECH_KEYWORDS:
             offers = self.fetch_offers(keyword)
 
             for offer in offers: 

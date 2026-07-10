@@ -27,9 +27,18 @@ ADZUNA_BASE_URL = "https://api.adzuna.com/v1/api/jobs"
 EMPLOIMA_BASE_URL = "https://www.emploi.ma"
 EMPLOIMA_SEARCH_URL = "https://www.emploi.ma/recherche-jobs-maroc/informatique"
 
+#Hellowork
+HELLOWORK_BASE_URL      = "https://www.hellowork.com"
+HELLOWORK_SEARCH_URL    = "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=informatique&l=France"
+HELLOWORK_SEARCH_KEYWORD = "informatique"
+
+
+# APIFY
+APIFY_API_TOKEN      = os.getenv("APIFY_API_TOKEN")
+APIFY_INDEED_ACTOR   = "misceres~indeed-scraper"
 
 # Tech keywords to search 
-ADZUNA_TECH_KEYWORDS = [
+TECH_KEYWORDS = [
     "data engineer",
     "data scientist",
     "python developer",

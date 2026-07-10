@@ -25,6 +25,7 @@ import os
  
 from config.settings import EMPLOIMA_BASE_URL, EMPLOIMA_SEARCH_URL ,GROQ_API_KEY ,GROQ_URL
 from services.ingestion.normalizers.field_mapper import map_emploima
+from services.ingestion.shared.http import fetch_page
  
 logging.basicConfig(
     level=logging.INFO,
@@ -38,34 +39,8 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # ---------------------------------------------------------------------------
  
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept-Language": "fr-FR,fr;q=0.9",
-}
- 
 REQUEST_DELAY = 1.5  # seconds between requests
 MAX_PAGES     = 5    # 1 page = ~25 offers
-
-# ---------------------------------------------------------------------------
-# HTTP HELPER
-# ---------------------------------------------------------------------------
- 
-def fetch_page(url: str) -> BeautifulSoup | None:
-    """Fetches a URL and returns BeautifulSoup. Returns None on failure."""
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
-        return BeautifulSoup(response.text, "html.parser")
-    except requests.exceptions.HTTPError as e:
-        logger.error("HTTP error fetching %s : %s", url, e)
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error("Network error fetching %s : %s", url, e)
-        return None
 
 # ---------------------------------------------------------------------------
 # STRUCTURED FIELD EXTRACTOR

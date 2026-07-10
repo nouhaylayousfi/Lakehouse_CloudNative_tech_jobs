@@ -535,3 +535,85 @@ def map_emploima(raw: dict) -> dict:
         "qualites_pro":       [],
         "langues":            [],
     }
+
+def map_indeed(raw: dict, country: str = "MA") -> dict:
+    """Maps raw Apify Indeed scraper output to unified schema."""
+
+    url     = raw.get("url", "")
+    id_hash = hashlib.md5(f"indeed_{url}".encode()).hexdigest()
+
+    # jobType is a list e.g. ["Full-time"]
+    job_types    = raw.get("jobType") or []
+    type_contrat = " | ".join(job_types)
+
+    # salary
+    salaire_brut = raw.get("salary") or ""
+
+    # company size from companyInfo
+    company_info     = raw.get("companyInfo") or {}
+    tranche_effectif = None
+    size = company_info.get("companySize")
+    if size and size.get("min") and size.get("max"):
+        tranche_effectif = f"{size['min']}-{size['max']}"
+
+    # date — keep YYYY-MM-DD only
+    date_pub = ""
+    raw_date = raw.get("postingDateParsed") or raw.get("postedAt") or ""
+    if raw_date and "T" in raw_date:
+        date_pub = raw_date[:10]
+
+    # source tag differs by country
+    source = "indeed_ma" if country == "MA" else "indeed_fr"
+    pays   = country  # "MA" or "FR"
+
+    return {
+        # Identification
+        "id_hash":            id_hash,
+        "id_source":          raw.get("id", url),
+        "source":             source,
+        "pays":               pays,
+
+        # Job
+        "titre_brut":         raw.get("positionName", ""),
+        "description":        raw.get("description", ""),
+        "type_contrat":       type_contrat,
+        "niveau_experience":  "",
+        "education":          "",
+
+        # Location
+        "ville_brute":        raw.get("location", ""),
+        "code_postal":        None,
+        "latitude":           None,
+        "longitude":          None,
+
+        # Company
+        "entreprise":         raw.get("company", ""),
+        "secteur_activite":   "",
+        "tranche_effectif":   tranche_effectif,
+
+        # Salary
+        "salaire_brut":       salaire_brut,
+        "salaire_min":        None,
+        "salaire_max":        None,
+
+        # Skills — extracted in Silver layer
+        "competences_brutes": [],
+        "qualites_pro":       [],
+        "langues":            [],
+
+        # ROME — not available on Indeed
+        "code_rome":          None,
+        "libelle_rome":       None,
+        "appellation_rome":   None,
+
+        # Remote
+        "remote":             "",
+
+        # Metadata
+        "date_publication":   date_pub,
+        "date_actualisation": None,
+        "date_ingestion":     datetime.utcnow().isoformat(),
+        "url_offre":          url,
+        "nombre_postes":      "",
+        "langue":             "fr",
+    }

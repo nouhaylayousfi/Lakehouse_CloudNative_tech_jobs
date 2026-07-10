@@ -69,23 +69,39 @@ def scrape_jobs():
         logger.info("Rekrute : written to %s", key)
         return key
 
-    @task(task_id="ingest_emploima")
-    def ingest_emploima() -> list[dict]:
-        from services.ingestion.scrapers.emploi_ma import EmploiMaScraper
-        from services.ingestion.producers.bronze_writer import write_to_bronze
-        
-        scraper = EmploiMaScraper(max_pages=5)
-        offers  = scraper.scrape()
 
-        logger.info("Emploi.ma : %d offers collected", len(offers))
-        key = write_to_bronze(offers, source="emploi_ma")
-        logger.info("Emploi.ma : written to %s", key)
+    @task(task_id="ingest_indeed_ma")
+    def ingest_indeed_ma() -> str:
+        from services.ingestion.scrapers.indeed import IndeedApifyConnector
+        from services.ingestion.producers.bronze_writer import write_to_bronze
+
+        connector = IndeedApifyConnector(country="MA", max_items=100)
+        offers = connector.scrape()
+
+        logger.info("Indeed MA (Apify) : %d offers collected", len(offers))
+        key = write_to_bronze(offers, source="indeed_ma")
+        logger.info("Indeed MA (Apify) : written to %s", key)
+        return key
+
+    
+    @task(task_id="ingest_indeed_fr")
+    def ingest_indeed_fr() -> str:
+        from services.ingestion.scrapers.indeed import IndeedApifyConnector
+        from services.ingestion.producers.bronze_writer import write_to_bronze
+    
+        connector = IndeedApifyConnector(country="FR", max_items=100)
+        offers    = connector.scrape()
+    
+        logger.info("Indeed FR (Apify) : %d offers collected", len(offers))
+        key = write_to_bronze(offers, source="indeed_fr")
+        logger.info("Indeed FR (Apify) : written to %s", key)
         return key
 
     ingest_france_travail()
     ingest_adzuna()
     ingest_rekrute()
-    ingest_emploima()
+    ingest_indeed_ma()
+    ingest_indeed_fr()
 
 
 scrape_jobs()
