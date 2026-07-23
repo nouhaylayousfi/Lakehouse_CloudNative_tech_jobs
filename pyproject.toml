@@ -1,9 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "PFE_TECH_JOBS"
 version = "0.1.0"
 
 dependencies = [
+    "python-dotenv",
     "boto3",
+    "s3fs"
 ]
 
 [tool.setuptools.packages.find]
