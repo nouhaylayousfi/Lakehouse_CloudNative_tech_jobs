@@ -26,7 +26,7 @@ from bs4 import BeautifulSoup
  
 from config.settings import REKRUTE_BASE_URL, REKRUTE_SEARCH_URL
 from services.ingestion.normalizers.field_mapper import map_rekrute
-from services.ingestion.skill_extraction.dict_matcher import extract_skills_from_text
+from services.silver.dict_matcher import extract_skills_from_text
 
 
 logging.basicConfig(
