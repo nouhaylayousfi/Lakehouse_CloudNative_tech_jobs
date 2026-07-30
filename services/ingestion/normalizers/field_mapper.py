@@ -1,6 +1,5 @@
 import hashlib
 from datetime import datetime
-from services.silver.dict_matcher import extract_skills_from_text
 import os
 import json
 import requests
