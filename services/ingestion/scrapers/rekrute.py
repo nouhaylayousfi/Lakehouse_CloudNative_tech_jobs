@@ -26,7 +26,6 @@ from bs4 import BeautifulSoup
  
 from config.settings import REKRUTE_BASE_URL, REKRUTE_SEARCH_URL
 from services.ingestion.normalizers.field_mapper import map_rekrute
-from services.silver.dict_matcher import extract_skills_from_text
 
 
 logging.basicConfig(
@@ -294,18 +293,18 @@ def parse_detail_page(url: str) -> dict:
     required_skills = ""
     profile         = ""
 
-    poste_section = soup.find("h3", string=lambda t: t and "Poste" in t)
+    poste_section = soup.find("h2", string=lambda t: t and "Poste" in t)
     if poste_section:
         for sibling in poste_section.find_next_siblings():
-            if sibling.name == "h3":
+            if sibling.name == "h2":
                 break
             missions += sibling.text.strip() + " "
         missions = missions.strip()
 
-    profil_section = soup.find("h3", string=lambda t: t and "Profil" in t)
+    profil_section = soup.find("h2", string=lambda t: t and "Profil" in t)
     if profil_section:
         for sibling in profil_section.find_next_siblings():
-            if sibling.name == "h3":
+            if sibling.name == "h2":
                 break
             required_skills += sibling.text.strip() + " "
         required_skills = required_skills.strip()
@@ -316,7 +315,7 @@ def parse_detail_page(url: str) -> dict:
  
     return {
         "company_name":        company_name,
-        #"company_description": company_description,
+        "company_description": company_description,
         "missions":            missions,
         "required_skills":     required_skills,
         "description":         description,
@@ -382,7 +381,7 @@ class RekruteScraper:
 
         # Normalize all offers via field_mapper 
         normalized = []
-        """for raw in all_raw:
+        for raw in all_raw:
             try:
                 offer = map_rekrute(raw)
                 normalized.append(offer)
@@ -391,8 +390,8 @@ class RekruteScraper:
                 print(f"ERROR normalizing: {e}")
                 print(f"Raw data: {raw}")
                 break  # stopper au premier problème
-        return normalized"""
-        for raw in all_raw:
+        return normalized
+        """for raw in all_raw:
             try: 
                 offer = map_rekrute(raw)
 
@@ -414,7 +413,7 @@ class RekruteScraper:
                 continue 
         
         logger.info("%d offers normalized successfully." , len(normalized))
-        return normalized
+        return normalized"""
 
     def health_check(self) -> bool: 
         url = f"{REKRUTE_SEARCH_URL}&p=1"
