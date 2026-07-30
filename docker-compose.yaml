@@ -395,6 +395,8 @@ services:
       - SPARK_WORKER_CORES=2
     depends_on:
       - spark-master
+    env_file:
+      - .env
     volumes:
       - .:/opt/spark/project
    
