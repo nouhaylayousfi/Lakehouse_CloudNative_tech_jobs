@@ -6,8 +6,15 @@ import os
 import time
 import requests
 import json
-from dict_matcher import TECH_SKILLS
+from services.silver.dict_matcher import TECH_SKILLS
 
+from dotenv import load_dotenv
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 SKILLS_WITH_SPECIAL_CHARS = ["c++", "c#", "pl/sql", "ci/cd", "pub/sub", "rest api", "api rest"]
@@ -38,6 +45,10 @@ def extract_skills_from_text(text: str) -> list[str]:
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL     = os.getenv("GROQ_URL")
+
+logger.info("GROQ_API_KEY présent : %s", bool(GROQ_API_KEY))
+logger.info("Variables d'env visibles (extrait) : %s", 
+            {k: v for k, v in os.environ.items() if "GROQ" in k or "SPARK" in k})
 
 _last_groq_call = 0.0  # timestamp of the last groq call
 
@@ -89,71 +100,101 @@ def enrich_with_llm(
 
     if not GROQ_API_KEY:
         logger.warning("GROQ_API_KEY not set — skipping LLM enrichment")
-        return {"competences_llm": [], "langues": [], "qualites_pro": []}
+        return {"competences_brutes": [], "langues": [], "qualites_pro": []}
 
     prompt = f"""
-        Tu es un système d'extraction d'information pour des offres d'emploi.
+        You are an information extraction system for job postings (job title + description).
 
-        Ta mission : extraire UNIQUEMENT les informations présentes dans le texte.
-        Tu ne dois rien inventer, rien déduire.
+        Your task: extract ONLY information that is explicitly present in the text below.
+        Never invent, never infer, never guess.
 
         #######################
-        TEXTE À ANALYSER
+        TEXT TO ANALYZE
         #######################
 
-        Titre:
+        Job title:
         {titre}
 
         Description:
-        {description[:2000]}
+        {description[:6000]}
 
-        Compétences déjà détectées (NE PAS répéter) :
-        {competences_dict if competences_dict else "aucune"}
+        Skills already detected (DO NOT repeat them):
+        {competences_dict if competences_dict else "none"}
 
         #######################
-        MISSION
+        TASK
         #######################
 
-        Extraire 3 catégories UNIQUEMENT :
+        Extract EXACTLY 3 categories. Nothing else.
 
-        1. competences
-        - Technologies, outils, frameworks, méthodes (ex: Python, Spark, Agile, Docker)
-        - PAS de langues humaines
-        - Normaliser en minuscules (ex: "Python" → "python")
+        1. "competences"
+        - Technical skills only: technologies, tools, frameworks, methodologies,
+        programming languages, software, certifications
+        (e.g. Python, Spark, Agile, Docker, AWS, Scrum)
+        - Do NOT include human/spoken languages here
+        - Normalize to lowercase (e.g. "Python" → "python")
+        - Do not repeat any skill already listed in "Skills already detected" above
 
-        2. langues
-        - UNIQUEMENT langues humaines explicitement mentionnées
-        - Extraire TOUTES les langues présentes dans une même phrase
-        - IMPORTANT : ne jamais choisir une seule langue dans une liste implicite
-
-        - Les séparateurs suivants doivent être traités comme des séparateurs de langues :
+        2. "langues"
+        - ONLY human/spoken languages explicitly mentioned (e.g. French, English, Arabic, Spanish)
+        - Keep the language names in the SAME language as the source text
+        (e.g. "français", "anglais" — do NOT translate them to English)
+        - Extract ALL languages present in the same sentence or list, never just one
+        - Treat these as separators between multiple languages:
         "et", "ou", "et/ou", "/", ","
+        - If a proficiency level is mentioned (e.g. "anglais courant"), extract only the
+        language name, not the level
 
-        - Exemple CRITIQUE :
-        "une bonne compréhension du français et/ou de l'espagnol"
+        CRITICAL example:
+        Text: "une bonne compréhension du français et/ou de l'espagnol"
         → ["français", "espagnol"]
 
-        - Exemple :
-        "anglais courant exigé, arabe souhaité"
+        Example:
+        Text: "anglais courant exigé, arabe souhaité"
         → ["anglais", "arabe"]
 
-        3. qualites_pro
-        - soft skills uniquement (ex: rigueur, autonomie, esprit d’équipe, communication)
-        - pas de compétences techniques
+        3. "qualites_pro"
+        - Soft skills of the CANDIDATE only (personal/behavioral qualities expected from
+        the applicant), e.g. rigueur, autonomie, esprit d'équipe, communication,
+        sens de l'organisation, force de proposition
+        - Keep them in the SAME language as the source text (do not translate to English)
+        - Do NOT include technical skills here
+        - STRICTLY EXCLUDE any sentence about the company's own policies, values, or
+        commitments, even if it uses similar vocabulary. This includes (non-exhaustive):
+        diversity, inclusion, equal opportunity ("égalité des chances"), disability
+        policy ("RQTH", "handicap"), gender equality, non-discrimination, CSR/RSE
+        statements, employer branding phrases ("nous rejoindre", "notre culture
+        d'entreprise", "pourquoi nous choisir")
+        - These are statements ABOUT the company, not qualities expected FROM the
+        candidate — never extract them as qualites_pro
+
+        Example to EXTRACT:
+        Text: "Esprit d'équipe, rigueur et autonomie sont attendus"
+        → qualites_pro: ["esprit d'équipe", "rigueur", "autonomie"]
+
+        Example to NOT extract (company policy, not a candidate quality):
+        Text: "Notre entreprise s'engage pour la diversité, l'inclusion et l'égalité
+        des chances, et étudie toutes les candidatures y compris celles de personnes
+        en situation de handicap"
+        → qualites_pro: []
 
         #######################
-        RÈGLES STRICTES
+        STRICT RULES
         #######################
 
-        - Utilise UNIQUEMENT les informations présentes dans le texte
-        - Ne déduis rien
-        - Ne reformule pas de façon libre
-        - Pas de doublons
-        - Réponse en JSON STRICT uniquement
-        - Si une catégorie est vide → []
+        - Use ONLY information explicitly present in the text
+        - Never infer, never guess, never complete a partial list with assumptions
+        - Never paraphrase or rewrite terms freely — extract them as close to the
+        original wording as possible
+        - No duplicates within a category
+        - If a category has nothing to extract → return an empty array []
+        - Output values in "langues" and "qualites_pro" stay in the original language
+        of the source text (French). Only "competences" is normalized to lowercase.
+        - Respond with STRICT JSON only — no markdown, no code fences, no explanation,
+        no text before or after the JSON object
 
         #######################
-        FORMAT DE SORTIE OBLIGATOIRE
+        REQUIRED OUTPUT FORMAT
         #######################
 
         {{
@@ -163,25 +204,28 @@ def enrich_with_llm(
         }}
 
         #######################
-        EXEMPLES
+        FULL EXAMPLES
         #######################
 
-        Texte: "Maîtrise de Python, Spark et Hadoop"
+        Text: "Maîtrise de Python, Spark et Hadoop"
         → competences: ["python", "spark", "hadoop"]
 
-        Texte: "Bonne compréhension du français et de l'espagnol"
+        Text: "Bonne compréhension du français et de l'espagnol"
         → langues: ["français", "espagnol"]
 
-        Texte: "Esprit d'équipe, rigueur et autonomie"
+        Text: "Esprit d'équipe, rigueur et autonomie"
         → qualites_pro: ["esprit d'équipe", "rigueur", "autonomie"]
 
+        Text: "Nous encourageons la diversité et l'égalité des chances au sein de nos équipes"
+        → qualites_pro: []
+
         #######################
-        IMPORTANT FINAL
+        FINAL REMINDER
         #######################
-        Réponds UNIQUEMENT avec le JSON. Aucun texte avant ou après.
+        Respond with the JSON object ONLY. No text before or after it.
         """
     payload = {
-        "model": "llama-3.1-8b-instant",
+        "model": "llama-3.3-70b-versatile",
         "messages": [
             {
                 "role": "system",
@@ -194,7 +238,8 @@ def enrich_with_llm(
             {"role": "user", "content": prompt}
         ],
         "temperature": 0,
-        "max_tokens": 400,
+        "max_tokens": 800,
+        
     }
 
     headers = {
@@ -205,6 +250,7 @@ def enrich_with_llm(
     try:
 
         raw_text = call_groq_with_retry(payload, headers)
+        print("RAW LLM RESPONSE:", raw_text)  # debug temporaire
 
         # Log pour débugger ce que le LLM retourne réellement
         logger.debug("LLM raw response for '%s' : %s", titre, raw_text)
@@ -214,7 +260,7 @@ def enrich_with_llm(
         result   = json.loads(raw_text)
 
         enriched = {
-            "competences_llm": result.get("competences", []),
+            "competences_brutes": result.get("competences", []),
             "langues":         result.get("langues", []),
             "qualites_pro":    result.get("qualites_pro", []),
         }
@@ -222,7 +268,7 @@ def enrich_with_llm(
         logger.info(
             "LLM enrichment for '%s' → +%d skills | %d langues | %d qualites",
             titre,
-            len(enriched["competences_llm"]),
+            len(enriched["competences_brutes"]),
             len(enriched["langues"]),
             len(enriched["qualites_pro"]),
         )
@@ -231,7 +277,7 @@ def enrich_with_llm(
 
     except json.JSONDecodeError as e:
         logger.warning("LLM JSON parse error : %s | raw : %s", e, raw_text)
-        return {"competences_llm": [], "langues": [], "qualites_pro": []}
+        return {"competences_brutes": [], "langues": [], "qualites_pro": []}
     except Exception as e:
         logger.warning("LLM enrichment failed : %s", e)
-        return {"competences_llm": [], "langues": [], "qualites_pro": []}
+        return {"competences_brutes": [], "langues": [], "qualites_pro": []}
