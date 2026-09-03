@@ -9,3 +9,6 @@ jars/
 notebooks/
 airflow/logs
 mc.exe
+hive-jars/
+logs/
+spark-warehouse/
