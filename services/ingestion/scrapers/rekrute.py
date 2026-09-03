@@ -17,6 +17,7 @@ Selectors confirmed from real HTML inspection:
 """
 
 import hashlib
+import requests
 import logging
 import time
 from datetime import datetime
@@ -24,8 +25,10 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
  
-from config.settings import REKRUTE_BASE_URL, REKRUTE_SEARCH_URL
+from config.settings import REKRUTE_BASE_URL, REKRUTE_SEARCH_URL ,GROQ_REQUEST_DELAY
 from services.ingestion.normalizers.field_mapper import map_rekrute
+from services.ingestion.shared.llm_filter import is_tech_offer_llm
+
 
 
 logging.basicConfig(
@@ -59,21 +62,23 @@ MAX_PAGES = 5
 # ---------------------------------------------------------------------------
 # HTTP HELPERS
 # ---------------------------------------------------------------------------
-def fetch_page(url: str) -> BeautifulSoup | None: 
+def fetch_page(url: str, max_retries: int =2) -> BeautifulSoup | None: 
     """
     Fetches a URL and returns a BeautifulSoup object.
     Returns None if the request fails — caller decides what to do.
     """
-    try: 
-        response = requests.get(url, headers= HEADERS, timeout=15)
-        response.raise_for_status()
-        return BeautifulSoup(response.text, "html.parser")
-    except request.exceptions.HTTPError as e: 
-        logger.error("HTTP error fetching %s : %s", url, e)
-        return None 
-    except request.exceptions.RequestException as e:
-        logger.error("Network error fetching %s : %s", url, e)
-        return None
+    for attempt in range(max_retries +1):
+        try: 
+            response = requests.get(url, headers= HEADERS, timeout=15)
+            response.raise_for_status()
+            return BeautifulSoup(response.text, "html.parser")
+        except requests.exceptions.RequestException as e: 
+            if attempt < max_retries:
+                logger.warning("Retry %d/%d for %s: %s", attempt + 1, max_retries, url, e)
+                time.sleep(2 ** attempt)
+            else:
+                logger.error("Failed after retries fetching %s : %s", url, e)
+                return None
 
 # ---------------------------------------------------------------------------
 # LIST PAGE PARSING
@@ -226,7 +231,7 @@ def scrape_list_page(page_number: int) -> list[dict]:
 # DETAIL PAGE PARSING
 # ---------------------------------------------------------------------------
  
-def parse_detail_page(url: str) -> dict:
+def parse_detail_page(url: str , company_img_alt_fallback: str = "") -> dict:
     """
     Fetches and parses a single offer detail page.
     Returns description, missions, required skills and company info.
@@ -241,6 +246,20 @@ def parse_detail_page(url: str) -> dict:
     if not soup: 
         return {}
 
+    import re
+
+    def extract_company_from_href(img_block):
+        link = img_block.find("a", href=True)
+        if not link:
+            return ""
+        href = link["href"]
+        match = re.search(r'/([a-z0-9\-]+)-emploi-recrutement-\d+\.html', href)
+        if match:
+            slug = match.group(1)
+            name = slug.replace("---", " - ").replace("-", " ").title()
+            return re.sub(r'\s+', ' ', name).strip()
+        return ""
+
     # --- Company name & description ---
     company_name        = ""
     company_description = ""
@@ -250,17 +269,23 @@ def parse_detail_page(url: str) -> dict:
         ["h2", "h3"] ,
         string=lambda t: t and "Entreprise" in t
     )
+    
+    img_block = soup.find("div", class_="listImg")
+    company_name = company_img_alt_fallback
 
-    if entreprise_header:
-        #collect all content until next h2/h3
+    if not company_name and img_block:
+        company_name = extract_company_from_href(img_block)
+
+    if not company_name and entreprise_header:
+        # collect all content until next h2/h3
         content_tags = []
         for sibling in entreprise_header.find_next_siblings():
             if sibling.name in ["h2", "h3"]:
                 break
             content_tags.append(sibling)
 
-        # Company name - try first <strong> first , then first <p> text 
-        first_strong = None 
+        # Company name - try first <strong> first, then first <p> text
+        first_strong = None
         first_p_text = ""
 
         for tag in content_tags:
@@ -268,24 +293,19 @@ def parse_detail_page(url: str) -> dict:
                 strong = tag.find("strong")
                 if strong and strong.text.strip():
                     first_strong = strong.text.strip()
-                    # Clean non-breaking spaces and special chars 
                     first_strong = first_strong.replace("\xa0", " ").strip()
 
             if not first_p_text and tag.name == "p" and tag.text.strip():
                 first_p_text = tag.text.strip().replace("\xa0", " ").strip()
 
-        company_name = first_strong or first_p_text 
+        company_name = first_strong or first_p_text
 
-        # Full company description - all text combined 
+        # Full company description - all text combined
         company_description = " ".join(
             t.text.replace("\xa0", " ").strip()
             for t in content_tags
             if t.text.strip()
-         )       
-
-    # Fallback — use img alt from list page 
-    if not company_name:
-        company_name = soup.get("company_img_alt", "")
+        )
 
     # --- Missions and required skills ---
     # Rekrute detail page has sections: "Poste :", "Profil recherché :"
@@ -366,6 +386,20 @@ class RekruteScraper:
                     continue 
                 seen_urls.add(url)
 
+                # --- Tech relevance filter ---
+                secteur_hint = ", ".join(card.get("secteur", [])) or ", ".join(card.get("fonction", []))
+                is_tech = is_tech_offer_llm(card.get("titre_brut", ""), secteur_hint, card.get("summary", ""))
+                time.sleep(GROQ_REQUEST_DELAY)  # respecte le RPM avant le prochain appel
+
+                if not is_tech:
+                    logger.info("Skipping non-tech offer: %s", card.get("titre_brut", ""))
+                    continue
+
+            if self.fetch_details and url:
+                time.sleep(REQUEST_DELAY)
+                detail = parse_detail_page(url, company_img_alt_fallback=card.get("company_img_alt", ""))
+                card.update(detail)
+
                 #fetch detail page if enabled 
                 if self.fetch_details and url: 
                     time.sleep(REQUEST_DELAY)
@@ -391,29 +425,7 @@ class RekruteScraper:
                 print(f"Raw data: {raw}")
                 break  # stopper au premier problème
         return normalized
-        """for raw in all_raw:
-            try: 
-                offer = map_rekrute(raw)
-
-                # Extract skills from description 
-                skills = extract_skills_from_text(
-                    offer.get("description", "") + " " + offer.get("titre_brut", "")
-                )
-                offer["competences_brutes"] = skills 
-
-                # Filter - keep only offers with at least 1 tech skill 
-                if not skills : 
-                    logger.debug("Skipping non tech offer : %s", offer["titre_brut"])
-                    continue
-                
-                normalized.append(offer)
-            
-            except Exception as e: 
-                logger.warning("Error normalizing offer : %s", e)
-                continue 
         
-        logger.info("%d offers normalized successfully." , len(normalized))
-        return normalized"""
 
     def health_check(self) -> bool: 
         url = f"{REKRUTE_SEARCH_URL}&p=1"
