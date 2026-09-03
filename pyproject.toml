@@ -7,9 +7,11 @@ name = "PFE_TECH_JOBS"
 version = "0.1.0"
 
 dependencies = [
+    "requests",
     "python-dotenv",
     "boto3",
-    "s3fs"
+    "s3fs",
+    "dbt-spark[PyHive]"
 ]
 
 [tool.setuptools.packages.find]
