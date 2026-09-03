@@ -144,7 +144,7 @@ class IndeedApifyConnector:
       5. Normalize via field_mapper
     """
 
-    def __init__(self, country: str ="MA", max_items:int =100):
+    def __init__(self, country: str ="MA", max_items:int =10):
         """
         Args:
             country:   "MA" for Morocco, "FR" for France
