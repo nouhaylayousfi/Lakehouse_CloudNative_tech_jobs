@@ -1,20 +1,24 @@
 import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
-
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
 from pyspark.conf import SparkConf
-from pyspark.sql import SparkSession , Window
-from pyspark.sql import functions as F 
-from pyspark.sql.functions import col ,row_number ,desc ,to_timestamp ,when , upper , trim , regexp_replace , array , lit , udf
-from pyspark.sql.types import *
-from services.silver.skill_extractor import extract_skills_from_text
-from services.silver.dict_matcher import TECH_SKILLS , SYNONYMS
+from pyspark.sql import SparkSession
+import argparse
+import json
 
+from services.silver.schema import build_silver_schema
+from services.silver.dedup import deduplicate, deduplicate_cross_source
+from services.silver.dates import normalize_dates
+from services.silver.skills import extract_and_normalize_skills
+from services.silver.salaire import apply_salaire_parsing
+from services.silver.parsers import apply_experience_parsing, apply_education_parsing
+from services.silver.contrat import normalize_type_contrat
+from services.silver.entreprise import clean_entreprise
+from services.silver.data_quality import validate_silver
+from services.silver.silver_writer import write_to_silver
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 def create_spark_session_minio(spark_master_url , s3_url ,s3_access_key ,s3_secret_key):
@@ -24,110 +28,92 @@ def create_spark_session_minio(spark_master_url , s3_url ,s3_access_key ,s3_secr
     conf.set('spark.hadoop.fs.s3a.secret.key', s3_secret_key)
     conf.set('spark.hadoop.fs.s3a.impl', 'org.apache.hadoop.fs.s3a.S3AFileSystem')
     conf.set('spark.hadoop.fs.s3a.path.style.access', 'true')
-    
+
+    PROJECT_JARS_DIR = os.getenv("PROJECT_JARS_DIR", "/opt/spark/project/jars") 
+
+    conf.set('spark.jars', ",".join([
+        f"{PROJECT_JARS_DIR}/hadoop-aws-3.3.4.jar",
+        f"{PROJECT_JARS_DIR}/aws-java-sdk-bundle-1.12.262.jar",
+        f"{PROJECT_JARS_DIR}/delta-spark_2.12-3.2.0.jar",
+        f"{PROJECT_JARS_DIR}/delta-storage-3.2.0.jar",
+    ]))
+
+    conf.set('spark.executorEnv.PYTHONPATH', '/opt/spark/project')
+
+    conf.set('spark.sql.extensions', 'io.delta.sql.DeltaSparkSessionExtension')
+    conf.set('spark.sql.catalog.spark_catalog', 'org.apache.spark.sql.delta.catalog.DeltaCatalog')
+    conf.set('hive.metastore.uris', 'thrift://hive-metastore:9083')
     spark = (
         SparkSession.builder
         .appName("tech project")
         .master(spark_master_url)
         .config(conf=conf)
+        .enableHiveSupport()
         .getOrCreate()
     )
     return spark
 
 # Read data from bronze layer
 def read_data_from_bronze(spark: SparkSession ):
-    df = (
+    """Read the entire Bronze history — used only for backfilling."""
+    return (
         spark.read
             .option("multiline", "true")
             .json("s3a://lakehouse/bronze/*/*.json")
     )
+
+def read_new_bronze_files(spark: SparkSession, bronze_keys: list[str]):
+    """Reads only the explicitly specified past Bronze files — used in incremental mode."""
+    bucket = os.getenv("MINIO_BRONZE_BUCKET")
+    paths = [f"s3a://{bucket}/{key}" for key in bronze_keys]
+    return spark.read.option("multiline", "true").json(paths)
+
+def run_silver_job(df):
+    df = build_silver_schema(df)
+    df = deduplicate(df)
+    df = deduplicate_cross_source(df)
+    df = normalize_dates(df)
+    df = extract_and_normalize_skills(df)
+    df = apply_salaire_parsing(df)
+    df = apply_experience_parsing(df)
+    df = apply_education_parsing(df)
+    df = normalize_type_contrat(df)
+    df = clean_entreprise(df)
+
+    validate_silver(df)
+
     return df
 
-# Deduplication
-def data_processing(df):
-
-    # Offers deduplication
-    window = Window\
-    .orderBy(desc("date_ingestion"))\
-    .partitionBy("id_hash")
-
-    df = df.withColumn(
-        "row_number" ,
-        row_number().over(window)
-    )
-
-    df = df.filter(df.row_number == 1)
-
-    # Cleaning 
-    # 1- Parsing date 
-    date_columns=[
-        "date_actualisation",
-        "date_ingestion",
-        "date_publication"
-    ]
-    for co in date_columns:
-        df = df.withColumn(
-            co, 
-            when (col(co) == "" , None )
-            .otherwise(to_timestamp(col(co)))
-        )
-    # 2- Normalizing columns 
-    columns = [
-        "ville_brute",
-        "entreprise", 
-        "type_contrat",
-        "secteur_activite",
-        "niveau_experience",
-        "education" ,
-        "remote"
-        ]
-    messages = {
-        "ville_brute" : "VILLE NON PRÉCISÉE",
-        "entreprise"  : "ENTREPRISE NON PRÉCISÉE",
-        "type_contrat": "TYPE DE CONTRAT NON PRÉCISÉE",
-        "secteur_activite" : "SECTEUR D'ACTIVITÉ NON PRÉCISÉE",
-        "niveau_experience": "NIVEAU D'EXPÉRIENCE NON PRÉCISÉE",
-        "education" : "NIVEAU D'ÉDUCATION NON PRÉCISÉE",
-        "remote" : "POSSIBILITÉ REMOTE NON PRÉCISÉE"
-        }
-    for c in columns: 
-        df = df.withColumn(
-            c,
-            when ((col(c).isNull()) , messages.get(c, "NON PRÉCISÉE"))
-            .otherwise(trim(upper(regexp_replace(col(c) , r"\s+" , " "))))
-            )
-        
-    # 3- Skills extraction using dict-matcher and handle synonyms 
-    
-    extract_skills_udf = udf(extract_skills_from_text, ArrayType(StringType()))
-
-    df = df.withColumn(
-        "competences_brutes",
-        extract_skills_udf(col("description"))
-    )
-
-    @udf(ArrayType(StringType()))
-    def handle_syn(skills):
-        return list({SYNONYMS.get(s.lower(),s.lower())for s in (skills or [])})
-
-    df = df.withColumn("competences_brutes",handle_syn(col("competences_brutes")))
-
-    return df 
-
 if __name__ == "__main__":
-    spark_master_url = os.getenv('SPARK_MASTER_URL')
-    s3_url= os.getenv('MINIO_ENDPOINT')
-    s3_access_key= os.getenv('MINIO_ACCESS_KEY')
-    s3_secret_key = os.getenv('MINIO_SECRET_KEY')
-    spark = create_spark_session_minio(spark_master_url , s3_url ,s3_access_key ,s3_secret_key)
-    df = read_data_from_bronze(spark)
-    df_2 = data_processing(df)
-    #df.printSchema()
-    df_2.filter(
-        col("source").isin("indeed_fr", "france_travail")
-    ).select(
-        "titre_brut", "source", "competences_brutes", "langues", "qualites_pro", "url_offre"
-    ).show(5, truncate=False, vertical=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--bronze_keys", type=str, default=None,
+                         help="JSON list of Bronze keys to process incrementally")
+    parser.add_argument("--backfill", action="store_true",
+                         help="Process the entire Bronze history instead of new files only")
+    args = parser.parse_args()
 
+    spark = create_spark_session_minio(
+        os.getenv('SPARK_MASTER_URL'),
+        os.getenv('MINIO_ENDPOINT'),
+        os.getenv('MINIO_ACCESS_KEY'),
+        os.getenv('MINIO_SECRET_KEY'),
+    )
 
+    if args.backfill:
+        logger.info("Running FULL BACKFILL — reading entire Bronze history")
+        df_bronze = read_data_from_bronze(spark)
+        write_mode = "overwrite"
+    else:
+        bronze_keys = json.loads(args.bronze_keys) if args.bronze_keys else []
+        if not bronze_keys:
+            logger.warning("No new Bronze files to process - skipping Silver run")
+            exit(0)
+        logger.info("Running INCREMENTAL — %d new Bronze file(s)", len(bronze_keys))
+        df_bronze = read_new_bronze_files(spark, bronze_keys)
+        write_mode = "append"
 
+    df_silver = run_silver_job(df_bronze)
+    df_silver.printSchema()
+
+    path = write_to_silver(df_silver, source="offres", mode=write_mode)
+    logger.info("Silver written to %s (mode=%s)", path, write_mode)
