@@ -112,6 +112,7 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
     ports: 
       - "5432:5432"
     healthcheck:
@@ -360,6 +361,10 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes: 
       - minio_data:/data
+    networks:
+      default:
+        aliases:
+          - lakehouse.minio
     command: server /data --console-address ":9001"
     healthcheck: 
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -382,6 +387,7 @@ services:
       - minio
     volumes:
       - .:/opt/spark/project
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml
 
   spark-worker:
     build:
@@ -399,9 +405,69 @@ services:
       - .env
     volumes:
       - .:/opt/spark/project
-   
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml
+
+  hive-metastore:
+    image: bde2020/hive:2.3.2-postgresql-metastore
+    container_name: hive-metastore
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      SERVICE_PRECONDITION: "postgres:5432"
+    command: >
+      /opt/hive/bin/hive --service metastore
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./hive-jars/hadoop-aws-2.8.5.jar:/opt/hive/lib/hadoop-aws-2.7.4.jar   # écrase l'ancien avec le nouveau contenu
+      - ./hive-jars/aws-java-sdk-s3-1.10.6.jar:/opt/hive/lib/aws-java-sdk-1.7.4.jar
+      - ./hive-jars/aws-java-sdk-core-1.10.6.jar:/opt/hive/lib/aws-java-sdk-core-1.10.6.jar
+      - ./hive-jars/hadoop-common-2.8.5.jar:/opt/hadoop-2.7.4/share/hadoop/common/hadoop-common-2.7.4.jar
+      - ./hive-jars/hadoop-auth-2.8.5.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/hadoop-auth-2.7.4.jar
+      - ./hive-jars/htrace-core4-4.0.1-incubating.jar:/opt/hadoop-2.7.4/share/hadoop/common/lib/htrace-core4-4.0.1-incubating.jar
+      - ./hive-jars/postgresql-42.7.3.jar:/opt/hive/lib/postgresql-42.7.3.jar
+      - ./config/core-site.xml:/opt/hadoop-2.7.4/etc/hadoop/core-site.xml
+
+  spark-thrift-server:
+    build:
+      context: .
+      dockerfile: dockerfiles/spark/dockerfile
+    container_name: spark-thrift-server
+    command: >
+      /opt/spark/bin/spark-submit
+      --class org.apache.spark.sql.hive.thriftserver.HiveThriftServer2
+      --master spark://spark-master:7077
+      --conf spark.hadoop.hive.metastore.uris=thrift://hive-metastore:9083
+      --conf spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension
+      --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog
+      spark-internal
+    depends_on:
+      - spark-master
+      - hive-metastore
+      - minio
+    ports: 
+      - "10000:10000"
+    volumes:
+      - .:/opt/spark/project
+      - ./config/hive-site.xml:/opt/spark/conf/hive-site.xml
+      - ./config/core-site.xml:/opt/spark/conf/core-site.xml
+    env_file:
+      - .env
+
+  dbt:
+    build:
+      context: .
+      dockerfile: dockerfiles/dbt/dockerfile
+    container_name: dbt
+    volumes:
+      - ./dbt/lakehouse_gold:/usr/app/dbt
+      - ./dbt/profiles:/root/.dbt
+    entrypoint: ["tail", "-f", "/dev/null"]
 
 volumes:
   postgres-db-volume:
   minio_data:
+  postgres-metastore-data:
   
