@@ -6,6 +6,7 @@ load_dotenv()
 #Groq
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_REQUEST_DELAY = 2.5
 
 #France Travail 
 FT_CLIENT_ID = os.getenv("FT_CLIENT_ID")
